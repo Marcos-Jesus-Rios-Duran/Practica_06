@@ -17,21 +17,26 @@ const getLocalIp = () => {
     return null; 
 };
 
-// Obtener la dirección MAC
-const getClientIP = () => {
-    return macaddress.oneSync();
+// Obtener la dirección MAC (corregido)
+const getClientIP = async () => {
+    try {
+        return await macaddress.one();  // Ahora es asíncrono
+    } catch (error) {
+        console.error("Error obteniendo la dirección MAC:", error);
+        return "MAC_NO_DISPONIBLE";
+    }
 };
 
 // Ruta raíz
 export const welcome = (req, res) => {
     res.status(200).json({
-        message: 'Bienvendi@ a la API de Control de Sesiones',
+        message: 'Bienvenid@ a la API de Control de Sesiones',
         author: 'Marcos Jesús Ríos Duran'
     });
 };
 
 // Login (crear sesión)
-export const login = (req, res) => {
+export const login = async (req, res) => {
     const { email, nickname, macAddress } = req.body;
     if (!email || !nickname || !macAddress) {
         return res.status(400).json({ message: 'Se esperan campos requeridos' });
@@ -40,12 +45,15 @@ export const login = (req, res) => {
     const sessionID = uuidv4();
     const now = new Date();
 
+    // Obtener la dirección MAC correctamente
+    const clientMac = await getClientIP();
+
     const sessionData = {
         sessionID,
         email,
         nickname,
         macAddress,
-        ip: getClientIP(),
+        ip: clientMac,   // Aquí usamos la dirección MAC obtenida
         createdAt: now,
         lastAccessed: now,
         serverIp: getLocalIp(),
