@@ -14,7 +14,7 @@ const getLocalIp = () => {
             }
         }
     }
-    return null; 
+    return null;
 };
 
 // Obtener la dirección MAC
@@ -53,7 +53,7 @@ export const login = async (req, res) => {
         email,
         nickname,
         macAddress,
-        ip: clientMac,   
+        ip: clientMac,
         createdAt: now,
         lastAccessed: now,
         serverIp: getLocalIp(),

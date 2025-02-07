@@ -1,25 +1,4 @@
-import fs from 'fs';
-import crypto from 'crypto';
 import Session from '../models/Session.js';
-
-// 🔑 Cargar clave privada para desencriptar datos
-const privateKey = fs.readFileSync('./keys/private.pem', 'utf8');
-
-// 🔓 Función para descifrar datos con la clave privada
-const decryptData = (encryptedData) => {
-    try {
-        return crypto.privateDecrypt(
-            {
-                key: privateKey,
-                padding: crypto.constants.RSA_PKCS1_PADDING
-            },
-            Buffer.from(encryptedData, 'base64')
-        ).toString();
-    } catch (error) {
-        console.error("Error al descifrar:", error);
-        return null;
-    }
-};
 
 // 📌 Crear una nueva sesión en la base de datos
 const createSession = async (sessionData) => {
@@ -28,25 +7,12 @@ const createSession = async (sessionData) => {
 
 // 📌 Buscar sesión por ID
 const findSessionById = async (sessionID) => {
-    const session = await Session.findOne({ sessionID }).exec();
-    if (!session) return null;
-    
-    // Desencriptar email y macAddress antes de devolver
-    return {
-        ...session._doc,
-        email: decryptData(session.email),
-        macAddress: decryptData(session.macAddress)
-    };
+    return Session.findOne({ sessionID }).exec();
 };
 
 // 📌 Buscar sesión por email
 const findSessionByEmail = async (inputEmail) => {
-    const sessions = await Session.find().exec();
-    for (const session of sessions) {
-        const decryptedEmail = decryptData(session.email);
-        if (decryptedEmail === inputEmail) return session;
-    }
-    return null;
+    return Session.findOne({ email: inputEmail }).exec();
 };
 
 // 📌 Actualizar estado y último acceso de una sesión
@@ -78,24 +44,14 @@ const deleteSession = async (sessionID) => {
     return Session.findOneAndDelete({ sessionID }).exec();
 };
 
-// 📌 Obtener todas las sesiones con datos desencriptados
+// 📌 Obtener todas las sesiones
 const getAllSessions = async () => {
-    const sessions = await Session.find().exec();
-    return sessions.map(session => ({
-        ...session._doc,
-        email: decryptData(session.email),
-        macAddress: decryptData(session.macAddress)
-    }));
+    return Session.find().exec();
 };
 
 // 📌 Obtener solo las sesiones activas
 const getActiveSessions = async () => {
-    const sessions = await Session.find({ status: "Activa" }).exec();
-    return sessions.map(session => ({
-        ...session._doc,
-        email: decryptData(session.email),
-        macAddress: decryptData(session.macAddress)
-    }));
+    return Session.find({ status: "Activa" }).exec();
 };
 
 // 📌 Eliminar todas las sesiones (⚠ PELIGROSO)
