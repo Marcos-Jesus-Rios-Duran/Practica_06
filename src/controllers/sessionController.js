@@ -1,7 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import os from 'os';
 import macaddress from 'macaddress';
-import { createSession, findSessionById, updateSession, deleteSession, getAllSessions } from '../dao/sessionDao.js';
+import { createSession, findSessionById, updateSession, deleteSession, getAllSessions as daoGetAllSessions, getActiveSessions, deleteAllSessions as daoDeleteAllSessions } from '../dao/sessionDao.js';
 
 // Obtener la IP del servidor
 const getLocalIp = () => {
@@ -17,7 +17,7 @@ const getLocalIp = () => {
     return null; 
 };
 
-// Obtener la dirección MAC (corregido)
+// Obtener la dirección MAC
 const getClientIP = async () => {
     try {
         return await macaddress.one();  // Ahora es asíncrono
@@ -45,7 +45,7 @@ export const login = async (req, res) => {
     const sessionID = uuidv4();
     const now = new Date();
 
-    // Obtener la dirección MAC correctamente
+    // Obtener la dirección MAC 
     const clientMac = await getClientIP();
 
     const sessionData = {
@@ -53,7 +53,7 @@ export const login = async (req, res) => {
         email,
         nickname,
         macAddress,
-        ip: clientMac,   // Aquí usamos la dirección MAC obtenida
+        ip: clientMac,   
         createdAt: now,
         lastAccessed: now,
         serverIp: getLocalIp(),
@@ -84,13 +84,13 @@ export const logout = (req, res) => {
 
 // Actualizar última actividad de la sesión
 export const updateSessionController = (req, res) => {
-    const { sessionID } = req.body;
+    const { sessionID, status } = req.body;
 
-    if (!sessionID) {
-        return res.status(400).json({ message: 'Se requiere sessionID' });
+    if (!sessionID || !status) {
+        return res.status(400).json({ message: 'Se requiere sessionID y status' });
     }
 
-    updateSession(sessionID)
+    updateSession(sessionID, status)
         .then(session => {
             if (!session) {
                 return res.status(404).json({ message: 'No existe una sesión activa' });
@@ -128,9 +128,23 @@ export const sessionStatus = (req, res) => {
         .catch(err => res.status(500).json({ message: 'Error al obtener estado', error: err.message }));
 };
 
-// Obtener todas las sesiones activas
-export const activeSessions = (req, res) => {
-    getAllSessions()
+// Obtener todas las sesiones (sin importar el estado)
+export const getAllSessions = (req, res) => {
+    daoGetAllSessions()
+        .then(sessions => res.status(200).json({ message: 'Todas las sesiones', sessions }))
+        .catch(err => res.status(500).json({ message: 'Error al obtener todas las sesiones', error: err.message }));
+};
+
+// Obtener solo las sesiones activas
+export const getAllCurrentSessions = (req, res) => {
+    getActiveSessions()
         .then(sessions => res.status(200).json({ message: 'Sesiones activas', sessions }))
-        .catch(err => res.status(500).json({ message: 'Error al obtener sesiones', error: err.message }));
+        .catch(err => res.status(500).json({ message: 'Error al obtener sesiones activas', error: err.message }));
+};
+
+// Eliminar todas las sesiones (⚠ PELIGROSO)
+export const deleteAllSessions = (req, res) => {
+    daoDeleteAllSessions()
+        .then(() => res.status(200).json({ message: 'Todas las sesiones han sido eliminadas' }))
+        .catch(err => res.status(500).json({ message: 'Error al eliminar todas las sesiones', error: err.message }));
 };

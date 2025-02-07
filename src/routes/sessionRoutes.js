@@ -1,5 +1,14 @@
 import { Router } from 'express';
-import { welcome, login, logout, updateSessionController, sessionStatus, activeSessions } from '../controllers/sessionController.js';
+import { 
+    welcome, 
+    login, 
+    logout, 
+    updateSessionController, 
+    sessionStatus, 
+    getAllCurrentSessions, 
+    getAllSessions, 
+    deleteAllSessions 
+} from '../controllers/sessionController.js';
 
 const router = Router();
 
@@ -8,6 +17,8 @@ router.post('/login', login);
 router.post('/logout', logout);
 router.post('/update', updateSessionController);
 router.get('/status', sessionStatus);
-router.get('/sessionactiva', activeSessions);
+router.get('/allSessions', getAllSessions);
+router.get('/allCurrentSessions', getAllCurrentSessions);
+router.delete('/deleteAllSessions', deleteAllSessions); 
 
 export default router;

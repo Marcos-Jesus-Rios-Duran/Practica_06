@@ -1,6 +1,11 @@
 import mongoose from 'mongoose';
-import bcrypt from 'bcrypt';
+import crypto from 'crypto';
 import moment from 'moment-timezone';
+import fs from 'fs';
+
+// 🔑 Cargar claves RSA desde archivos
+const publicKey = fs.readFileSync('./src/keys/public.pem', 'utf8');
+const privateKey = fs.readFileSync('../keys/private.pem', 'utf8');
 
 const sessionSchema = new mongoose.Schema({
     sessionID: { type: String, required: true, unique: true },
@@ -24,15 +29,15 @@ const sessionSchema = new mongoose.Schema({
     }
 });
 
-// 🔐 Middleware para encriptar datos sensibles antes de guardar
-sessionSchema.pre('save', async function(next) {
+// 🔐 Middleware para cifrar datos sensibles antes de guardar
+sessionSchema.pre('save', function (next) {
     if (this.isModified('email')) {
-        this.email = await bcrypt.hash(this.email, 10);
+        this.email = crypto.publicEncrypt(publicKey, Buffer.from(this.email)).toString('base64');
     }
     if (this.isModified('macAddress')) {
-        this.macAddress = await bcrypt.hash(this.macAddress, 10);
+        this.macAddress = crypto.publicEncrypt(publicKey, Buffer.from(this.macAddress)).toString('base64');
     }
     next();
 });
 
-export default mongoose.model('Sesiones', sessionSchema);
+export default mongoose.model('Session', sessionSchema);
