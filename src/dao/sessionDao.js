@@ -1,27 +1,72 @@
 import Session from '../models/Session.js';
 
-const createSession = (sessionData) => {
+// 📌 Crear una nueva sesión en la base de datos
+const createSession = async (sessionData) => {
     return new Session(sessionData).save();
 };
 
-const findSessionById = (sessionID) => {
+// 📌 Buscar sesión por ID
+const findSessionById = async (sessionID) => {
     return Session.findOne({ sessionID }).exec();
 };
 
-const updateSession = (sessionID) => {
+// 📌 Buscar sesión por email
+const findSessionByEmail = async (inputEmail) => {
+    return Session.findOne({ email: inputEmail }).exec();
+};
+
+// 📌 Actualizar estado y último acceso de una sesión
+const updateSession = async (sessionID, status) => {
     return Session.findOneAndUpdate(
         { sessionID },
-        { lastAccessed: new Date() },
+        { 
+            lastAccessed: new Date(),
+            status 
+        },
         { new: true }
     ).exec();
 };
 
-const deleteSession = (sessionID) => {
+// 📌 Cerrar sesión (Logout)
+ const logoutSession = async (sessionID) => {
+    return Session.findOneAndUpdate(
+        { sessionID },
+        { 
+            lastAccessed: new Date(),
+            status: "Finalizada por el Usuario" 
+        },
+        { new: true }
+    ).exec();
+};
+
+// 📌 Eliminar sesión por ID
+const deleteSession = async (sessionID) => {
     return Session.findOneAndDelete({ sessionID }).exec();
 };
 
-const getAllSessions = () => {
+// 📌 Obtener todas las sesiones
+const getAllSessions = async () => {
     return Session.find().exec();
 };
 
-export { createSession, findSessionById, updateSession, deleteSession, getAllSessions };
+// 📌 Obtener solo las sesiones activas
+const getActiveSessions = async () => {
+    return Session.find({ status: "Activa" }).exec();
+};
+
+// 📌 Eliminar todas las sesiones (⚠ PELIGROSO)
+const deleteAllSessions = async () => {
+    return Session.deleteMany({}).exec();
+};
+
+export { 
+    createSession, 
+    findSessionById, 
+    findSessionByEmail, 
+    updateSession, 
+    logoutSession,
+    deleteSession, 
+    getAllSessions, 
+    getActiveSessions, 
+    deleteAllSessions 
+};
