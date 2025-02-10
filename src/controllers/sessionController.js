@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import os from 'os';
 import macaddress from 'macaddress';
+import cron from 'node-cron';
 import { createSession, findSessionById, updateSession, deleteSession, getAllSessions as daoGetAllSessions, getActiveSessions, deleteAllSessions as daoDeleteAllSessions } from '../dao/sessionDao.js';
 
 // Obtener la IP del servidor
@@ -138,8 +139,14 @@ export const getAllSessions = (req, res) => {
 // Obtener solo las sesiones activas
 export const getAllCurrentSessions = (req, res) => {
     getActiveSessions()
-        .then(sessions => res.status(200).json({ message: 'Sesiones activas', sessions }))
-        .catch(err => res.status(500).json({ message: 'Error al obtener sesiones activas', error: err.message }));
+        .then(sessions => {
+            console.log("Sesiones activas encontradas:", sessions);
+            res.status(200).json({ message: 'Sesiones activas', sessions });
+        })
+        .catch(err => {
+            console.error("Error al obtener sesiones activas:", err);
+            res.status(500).json({ message: 'Error al obtener sesiones activas', error: err.message });
+        });
 };
 
 // Eliminar todas las sesiones (⚠ PELIGROSO)
@@ -148,3 +155,23 @@ export const deleteAllSessions = (req, res) => {
         .then(() => res.status(200).json({ message: 'Todas las sesiones han sido eliminadas' }))
         .catch(err => res.status(500).json({ message: 'Error al eliminar todas las sesiones', error: err.message }));
 };
+
+// Tarea programada para revisar sesiones activas cada minuto
+cron.schedule('* * * * *', async () => {
+    try {
+        const sessions = await getActiveSessions();
+        const now = new Date();
+
+        sessions.forEach(async (session) => {
+            const idleTimeInSeconds = (now - session.lastAccessed) / 1000;
+
+            // Si la sesión ha estado inactiva por más de 30 segundos, cambiar su estado
+            if (idleTimeInSeconds > 30 && session.status === "Activa") {
+                await updateSession(session.sessionID, "Inactiva");
+                console.log(`Sesión ${session.sessionID} marcada como inactiva por inactividad.`);
+            }
+        });
+    } catch (error) {
+        console.error('Error al verificar sesiones inactivas:', error);
+    }
+});

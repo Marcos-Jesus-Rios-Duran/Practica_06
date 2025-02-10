@@ -9,6 +9,7 @@
     "moment-timezone": "^0.5.47",
     "mongoose": "^8.10.0",
     "morgan": "^1.10.0",
+    "node-cron": "^3.0.3",
     "os": "^0.1.2",
     "uuid": "^11.0.5"
   },

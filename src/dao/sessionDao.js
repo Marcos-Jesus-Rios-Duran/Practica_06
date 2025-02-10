@@ -28,7 +28,7 @@ const updateSession = async (sessionID, status) => {
 };
 
 // 📌 Cerrar sesión (Logout)
-const logoutSession = async (sessionID) => {
+ const logoutSession = async (sessionID) => {
     return Session.findOneAndUpdate(
         { sessionID },
         { 
