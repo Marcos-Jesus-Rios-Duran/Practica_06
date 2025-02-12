@@ -1,10 +1,45 @@
+import fs from 'fs';
 import { v4 as uuidv4 } from 'uuid';
+import crypto from 'crypto';
 import os from 'os';
 import macaddress from 'macaddress';
 import cron from 'node-cron';
-import { createSession, findSessionById, updateSession, deleteSession, getAllSessions as daoGetAllSessions, getActiveSessions, deleteAllSessions as daoDeleteAllSessions } from '../dao/sessionDao.js';
+import { 
+    createSession, 
+    deleteSession, 
+    updateSession, 
+    findSessionById, 
+    getActiveSessions, 
+    getAllSessions as daoGetAllSessions, 
+    deleteAllSessions as daoDeleteAllSessions 
+} from '../dao/sessionDao.js';
 
-// Obtener la IP del servidor
+// Solo generar claves si no existen
+if (!fs.existsSync("private.pem") || !fs.existsSync("public.pem")) {
+    const { publicKey, privateKey } = crypto.generateKeyPairSync("rsa", {
+        modulusLength: 512,
+        publicKeyEncoding: { type: "spki", format: "pem" },
+        privateKeyEncoding: { type: "pkcs8", format: "pem" },
+    });
+
+    fs.writeFileSync("public.pem", publicKey);
+    fs.writeFileSync("private.pem", privateKey);
+}
+
+// Cargar claves guardadas
+const publicKey = fs.readFileSync("public.pem", "utf8");
+const privateKey = fs.readFileSync("private.pem", "utf8");
+
+// Función para cifrar datos
+const encryptData = (data) => {
+    return crypto.publicEncrypt(publicKey, Buffer.from(data)).toString("base64");
+};
+
+// Función para descifrar datos
+const decryptData = (encryptedData) => {
+    return crypto.privateDecrypt(privateKey, Buffer.from(encryptedData, "base64")).toString();
+};
+
 const getLocalIp = () => {
     const networkInterfaces = os.networkInterfaces();
     for (const interfaceName in networkInterfaces) {
@@ -18,17 +53,20 @@ const getLocalIp = () => {
     return null;
 };
 
-// Obtener la dirección MAC
-const getClientIP = async () => {
-    try {
-        return await macaddress.one();  // Ahora es asíncrono
-    } catch (error) {
-        console.error("Error obteniendo la dirección MAC:", error);
-        return "MAC_NO_DISPONIBLE";
+// Función para obtener la IP del cliente
+const getClientIP = (req) => {
+    let ip = req.headers["x-forwarded-for"]?.split(",")[0] || req.connection?.remoteAddress || req.socket?.remoteAddress || req.ip;
+
+    if (ip === "::1" || ip === "0.0.0.0") {
+        ip = getLocalIp();
     }
+    if (ip.includes("::ffff:")) {
+        ip = ip.split("::ffff:")[1];
+    }
+
+    return ip;
 };
 
-// Ruta raíz
 export const welcome = (req, res) => {
     res.status(200).json({
         message: 'Bienvenid@ a la API de Control de Sesiones',
@@ -36,127 +74,150 @@ export const welcome = (req, res) => {
     });
 };
 
-// Login (crear sesión)
 export const login = async (req, res) => {
-    const { email, nickname, macAddress } = req.body;
-    if (!email || !nickname || !macAddress) {
+    const { email, nickname } = req.body;
+    if (!email || !nickname) {
         return res.status(400).json({ message: 'Se esperan campos requeridos' });
     }
 
-    const sessionID = uuidv4();
-    const now = new Date();
+    try {
+        const sessionID = uuidv4();
+        const now = new Date();
+        const clientMac = await macaddress.one();
+        
+        // Encrypt sessionID and macAddress
+        const encryptedSessionID = encryptData(sessionID);
+        const encryptedMacAddress = encryptData(clientMac);
 
-    // Obtener la dirección MAC 
-    const clientMac = await getClientIP();
+        const sessionData = {
+            sessionID: encryptedSessionID,
+            email,
+            nickname,
+            macAddress: encryptedMacAddress,
+            ip: getClientIP(req),
+            createdAt: now,
+            lastAccessed: now,
+            serverIp: getLocalIp(),
+        };
 
-    const sessionData = {
-        sessionID,
-        email,
-        nickname,
-        macAddress,
-        ip: clientMac,
-        createdAt: now,
-        lastAccessed: now,
-        serverIp: getLocalIp(),
-    };
-
-    createSession(sessionData)
-        .then(() => res.status(200).json({ message: 'Sesión iniciada', sessionID }))
-        .catch(err => res.status(500).json({ message: 'Error al iniciar sesión', error: err.message }));
+        await createSession(sessionData);
+        res.status(200).json({ message: 'Sesión iniciada', sessionID });
+    } catch (error) {
+        res.status(500).json({ message: 'Error al procesar la solicitud', error: error.message });
+    }
 };
 
-// Logout (eliminar sesión)
-export const logout = (req, res) => {
+export const logout = async (req, res) => {
     const { sessionID } = req.body;
 
     if (!sessionID) {
         return res.status(400).json({ message: 'Se requiere sessionID' });
     }
 
-    deleteSession(sessionID)
-        .then(session => {
-            if (!session) {
-                return res.status(404).json({ message: 'No existe una sesión activa' });
-            }
-            res.status(200).json({ message: 'Logout exitoso' });
-        })
-        .catch(err => res.status(500).json({ message: 'Error al cerrar sesión', error: err.message }));
+    try {
+        // Encrypt sessionID for lookup
+        const encryptedSessionID = encryptData(sessionID);
+        const session = await deleteSession(encryptedSessionID);
+        if (!session) {
+            return res.status(404).json({ message: 'No existe una sesión activa' });
+        }
+        res.status(200).json({ message: 'Sesión cerrada exitosamente' });
+    } catch (error) {
+        res.status(500).json({ message: 'Error al cerrar sesión', error: error.message });
+    }
 };
 
-// Actualizar última actividad de la sesión
-export const updateSessionController = (req, res) => {
+export const updateSessionController = async (req, res) => {
     const { sessionID, status } = req.body;
 
     if (!sessionID || !status) {
         return res.status(400).json({ message: 'Se requiere sessionID y status' });
     }
 
-    updateSession(sessionID, status)
-        .then(session => {
-            if (!session) {
-                return res.status(404).json({ message: 'No existe una sesión activa' });
-            }
-            res.status(200).json({ message: 'Datos actualizados', session });
-        })
-        .catch(err => res.status(500).json({ message: 'Error al actualizar sesión', error: err.message }));
+    try {
+        // Encrypt sessionID for lookup
+        const encryptedSessionID = encryptData(sessionID);
+        const session = await updateSession(encryptedSessionID, status);
+        if (!session) {
+            return res.status(404).json({ message: 'No existe una sesión activa' });
+        }
+        res.status(200).json({ message: 'Datos actualizados', session });
+    } catch (error) {
+        res.status(500).json({ message: 'Error al actualizar sesión', error: error.message });
+    }
 };
 
-// Estado de una sesión
-export const sessionStatus = (req, res) => {
-    const sessionID = req.query.sessionID;
+export const sessionStatus = async (req, res) => {
+    const { sessionID } = req.query;
 
     if (!sessionID) {
         return res.status(400).json({ message: 'Se requiere sessionID' });
     }
 
-    findSessionById(sessionID)
-        .then(session => {
-            if (!session) {
-                return res.status(404).json({ message: 'No existe una sesión activa' });
-            }
+    try {
+        // Encrypt sessionID for lookup
+        const encryptedSessionID = encryptData(sessionID);
+        const session = await findSessionById(encryptedSessionID);
+        if (!session) {
+            return res.status(404).json({ message: 'No existe una sesión activa' });
+        }
 
-            const now = new Date();
-            const idleTime = (now - session.lastAccessed) / 1000;
-            const duration = (now - session.createdAt) / 1000;
+        // Decrypt sessionID and macAddress
+        session.sessionID = decryptData(session.sessionID);
+        session.macAddress = decryptData(session.macAddress);
 
-            res.status(200).json({
-                message: 'Sesión activa',
-                session,
-                idleTime: `${idleTime} segundos`,
-                duration: `${duration} segundos`
-            });
-        })
-        .catch(err => res.status(500).json({ message: 'Error al obtener estado', error: err.message }));
-};
+        const now = new Date();
+        const idleTime = (now - session.lastAccessed) / 1000;
+        const duration = (now - session.createdAt) / 1000;
 
-// Obtener todas las sesiones (sin importar el estado)
-export const getAllSessions = (req, res) => {
-    daoGetAllSessions()
-        .then(sessions => res.status(200).json({ message: 'Todas las sesiones', sessions }))
-        .catch(err => res.status(500).json({ message: 'Error al obtener todas las sesiones', error: err.message }));
-};
-
-// Obtener solo las sesiones activas
-export const getAllCurrentSessions = (req, res) => {
-    getActiveSessions()
-        .then(sessions => {
-            console.log("Sesiones activas encontradas:", sessions);
-            res.status(200).json({ message: 'Sesiones activas', sessions });
-        })
-        .catch(err => {
-            console.error("Error al obtener sesiones activas:", err);
-            res.status(500).json({ message: 'Error al obtener sesiones activas', error: err.message });
+        res.status(200).json({
+            message: 'Sesión activa',
+            session,
+            idleTime: `${idleTime} segundos`,
+            duration: `${duration} segundos`
         });
+    } catch (error) {
+        res.status(500).json({ message: 'Error al obtener estado', error: error.message });
+    }
 };
 
-// Eliminar todas las sesiones (⚠ PELIGROSO)
-export const deleteAllSessions = (req, res) => {
-    daoDeleteAllSessions()
-        .then(() => res.status(200).json({ message: 'Todas las sesiones han sido eliminadas' }))
-        .catch(err => res.status(500).json({ message: 'Error al eliminar todas las sesiones', error: err.message }));
+export const getAllSessions = async (req, res) => {
+    try {
+        const sessions = await daoGetAllSessions();
+        // Decrypt sessionID and macAddress for all sessions
+        sessions.forEach(session => {
+            session.sessionID = decryptData(session.sessionID);
+            session.macAddress = decryptData(session.macAddress);
+        });
+        res.status(200).json({ message: 'Todas las sesiones', sessions });
+    } catch (error) {
+        res.status(500).json({ message: 'Error al obtener todas las sesiones', error: error.message });
+    }
 };
 
-// Tarea programada para revisar sesiones activas cada minuto
+export const getAllCurrentSessions = async (req, res) => {
+    try {
+        const sessions = await getActiveSessions();
+        // Decrypt sessionID and macAddress for all sessions
+        sessions.forEach(session => {
+            session.sessionID = decryptData(session.sessionID);
+            session.macAddress = decryptData(session.macAddress);
+        });
+        res.status(200).json({ message: 'Sesiones activas', sessions });
+    } catch (error) {
+        res.status(500).json({ message: 'Error al obtener sesiones activas', error: error.message });
+    }
+};
+
+export const deleteAllSessions = async (req, res) => {
+    try {
+        await daoDeleteAllSessions();
+        res.status(200).json({ message: 'Todas las sesiones han sido eliminadas' });
+    } catch (error) {
+        res.status(500).json({ message: 'Error al eliminar todas las sesiones', error: error.message });
+    }
+};
+
 cron.schedule('* * * * *', async () => {
     try {
         const sessions = await getActiveSessions();
@@ -165,8 +226,8 @@ cron.schedule('* * * * *', async () => {
         sessions.forEach(async (session) => {
             const idleTimeInSeconds = (now - session.lastAccessed) / 1000;
 
-            // Si la sesión ha estado inactiva por más de 30 segundos, cambiar su estado
-            if (idleTimeInSeconds > 30 && session.status === "Activa") {
+            // Si la sesión ha estado inactiva por más de 5 minutos, cambiar su estado
+            if (idleTimeInSeconds > 300 && session.status === "Activa") {
                 await updateSession(session.sessionID, "Inactiva");
                 console.log(`Sesión ${session.sessionID} marcada como inactiva por inactividad.`);
             }

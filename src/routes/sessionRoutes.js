@@ -12,7 +12,7 @@ import {
 
 const router = Router();
 
-router.get('/', welcome);
+router.get('/welcome', welcome);
 router.post('/login', login);
 router.post('/logout', logout);
 router.post('/update', updateSessionController);
