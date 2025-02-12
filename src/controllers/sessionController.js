@@ -17,7 +17,7 @@ import {
 // Solo generar claves si no existen
 if (!fs.existsSync("private.pem") || !fs.existsSync("public.pem")) {
     const { publicKey, privateKey } = crypto.generateKeyPairSync("rsa", {
-        modulusLength: 512,
+        modulusLength: 2048,
         publicKeyEncoding: { type: "spki", format: "pem" },
         privateKeyEncoding: { type: "pkcs8", format: "pem" },
     });
@@ -30,16 +30,56 @@ if (!fs.existsSync("private.pem") || !fs.existsSync("public.pem")) {
 const publicKey = fs.readFileSync("public.pem", "utf8");
 const privateKey = fs.readFileSync("private.pem", "utf8");
 
+// Función para generar una clave AES
+const generateAESKey = () => {
+    return crypto.randomBytes(32); // 32 bytes = 256 bits
+};
+
+// Función para cifrar datos con AES
+const encryptDataAES = (data, key) => {
+    const iv = crypto.randomBytes(16);
+    const cipher = crypto.createCipheriv("aes-256-cbc", key, iv);
+    let encrypted = cipher.update(data, "utf8", "base64");
+    encrypted += cipher.final("base64");
+    return { iv: iv.toString("base64"), data: encrypted };
+};
+
+// Función para descifrar datos con AES
+const decryptDataAES = (encryptedData, key) => {
+    const iv = Buffer.from(encryptedData.iv, "base64");
+    const encryptedText = Buffer.from(encryptedData.data, "base64");
+    const decipher = crypto.createDecipheriv("aes-256-cbc", key, iv);
+    let decrypted = decipher.update(encryptedText, "base64", "utf8");
+    decrypted += decipher.final("utf8");
+    return decrypted;
+};
+
 // Función para cifrar datos
 const encryptData = (data) => {
-    return crypto.publicEncrypt(publicKey, Buffer.from(data)).toString("base64");
+    const aesKey = generateAESKey();
+    const encryptedData = encryptDataAES(data, aesKey);
+
+    // Cifrar la clave AES con RSA
+    const encryptedAESKey = crypto.publicEncrypt(publicKey, aesKey).toString("base64");
+
+    return JSON.stringify({
+        key: encryptedAESKey,
+        data: encryptedData
+    });
 };
 
 // Función para descifrar datos
 const decryptData = (encryptedData) => {
-    return crypto.privateDecrypt(privateKey, Buffer.from(encryptedData, "base64")).toString();
+    const encryptedObject = JSON.parse(encryptedData);
+
+    // Descifrar la clave AES con RSA
+    const aesKey = crypto.privateDecrypt(privateKey, Buffer.from(encryptedObject.key, "base64"));
+
+    return decryptDataAES(encryptedObject.data, aesKey);
 };
 
+
+// Función para obtener la IP local
 const getLocalIp = () => {
     const networkInterfaces = os.networkInterfaces();
     for (const interfaceName in networkInterfaces) {
@@ -107,6 +147,41 @@ export const login = async (req, res) => {
     }
 };
 
+export const sessionStatus = async (req, res) => {
+    const { sessionID } = req.query;
+
+    if (!sessionID) {
+        return res.status(400).json({ message: 'Se requiere sessionID' });
+    }
+
+    try {
+        // Encrypt sessionID for lookup
+        const encryptedSessionID = encryptData(sessionID);
+        const session = await findSessionById(encryptedSessionID);
+        if (!session) {
+            return res.status(404).json({ message: 'No existe una sesión activa' });
+        }
+
+        // Decrypt sessionID and macAddress
+        session.sessionID = decryptData(session.sessionID);
+        session.macAddress = decryptData(session.macAddress);
+
+        const now = new Date();
+        const idleTime = (now - session.lastAccessed) / 1000;
+        const duration = (now - session.createdAt) / 1000;
+
+        res.status(200).json({
+            message: 'Sesión activa',
+            session,
+            idleTime: `${idleTime} segundos`,
+            duration: `${duration} segundos`
+        });
+    } catch (error) {
+        res.status(500).json({ message: 'Error al obtener estado', error: error.message });
+    }
+};
+
+
 export const logout = async (req, res) => {
     const { sessionID } = req.body;
 
@@ -147,39 +222,6 @@ export const updateSessionController = async (req, res) => {
     }
 };
 
-export const sessionStatus = async (req, res) => {
-    const { sessionID } = req.query;
-
-    if (!sessionID) {
-        return res.status(400).json({ message: 'Se requiere sessionID' });
-    }
-
-    try {
-        // Encrypt sessionID for lookup
-        const encryptedSessionID = encryptData(sessionID);
-        const session = await findSessionById(encryptedSessionID);
-        if (!session) {
-            return res.status(404).json({ message: 'No existe una sesión activa' });
-        }
-
-        // Decrypt sessionID and macAddress
-        session.sessionID = decryptData(session.sessionID);
-        session.macAddress = decryptData(session.macAddress);
-
-        const now = new Date();
-        const idleTime = (now - session.lastAccessed) / 1000;
-        const duration = (now - session.createdAt) / 1000;
-
-        res.status(200).json({
-            message: 'Sesión activa',
-            session,
-            idleTime: `${idleTime} segundos`,
-            duration: `${duration} segundos`
-        });
-    } catch (error) {
-        res.status(500).json({ message: 'Error al obtener estado', error: error.message });
-    }
-};
 
 export const getAllSessions = async (req, res) => {
     try {
