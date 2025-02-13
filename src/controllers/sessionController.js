@@ -155,29 +155,48 @@ export const sessionStatus = async (req, res) => {
     }
 
     try {
-        // Encrypt sessionID for lookup
-        const encryptedSessionID = encryptData(sessionID);
-        const session = await findSessionById(encryptedSessionID);
-        if (!session) {
-            return res.status(404).json({ message: 'No existe una sesión activa' });
+        // 📌 Obtener todas las sesiones de la base de datos
+        const sessions = await getAllSessions();
+        console.log("Todas las sesiones obtenidas:", sessions); 
+
+        // 📌 Desencriptar `sessionID` y `macAddress` para todas las sesiones
+        const decryptedSessions = sessions.map(session => {
+            const decryptedSessionID = decryptData(session.sessionID);
+            const decryptedMacAddress = decryptData(session.macAddress);
+            console.log("Desencriptado sessionID:", decryptedSessionID);
+            console.log("Desencriptado macAddress:", decryptedMacAddress);
+            return {
+                ...session._doc,
+                sessionID: decryptedSessionID,
+                macAddress: decryptedMacAddress
+            };
+        });
+        
+        // 📌 Buscar la sesión que coincida con `sessionID` de la URL
+        const foundSession = decryptedSessions.find(session => session.sessionID === sessionID.trim());
+        console.log("Sesión encontrada:", foundSession);  // Verifica si la sesión fue encontrada correctamente
+        
+
+        if (!foundSession) {
+            console.log("No se encontró la sesión con sessionID:", sessionID);  // Para debug
+            return res.status(404).json({ message: 'Sesión no encontrada' });
         }
 
-        // Decrypt sessionID and macAddress
-        session.sessionID = decryptData(session.sessionID);
-        session.macAddress = decryptData(session.macAddress);
-
+        // ⏳ Calcular tiempos
         const now = new Date();
-        const idleTime = (now - session.lastAccessed) / 1000;
-        const duration = (now - session.createdAt) / 1000;
+        const idleTime = (now - new Date(foundSession.lastAccessed)) / 1000;
+        const duration = (now - new Date(foundSession.createdAt)) / 1000;
 
-        res.status(200).json({
+        // 📌 Enviar la sesión encontrada
+        return res.status(200).json({
             message: 'Sesión activa',
-            session,
+            session: foundSession,
             idleTime: `${idleTime} segundos`,
             duration: `${duration} segundos`
         });
+
     } catch (error) {
-        res.status(500).json({ message: 'Error al obtener estado', error: error.message });
+        res.status(500).json({ message: 'Error al obtener la sesión', error: error.message });
     }
 };
 
@@ -228,9 +247,14 @@ export const getAllSessions = async (req, res) => {
         const sessions = await daoGetAllSessions();
         // Decrypt sessionID and macAddress for all sessions
         sessions.forEach(session => {
-            session.sessionID = decryptData(session.sessionID);
-            session.macAddress = decryptData(session.macAddress);
+            try {
+                session.sessionID = decryptData(session.sessionID);
+                session.macAddress = decryptData(session.macAddress);
+            } catch (error) {
+                console.error("Error al desencriptar sesión:", error.message);
+            }
         });
+        console.log(sessions);
         res.status(200).json({ message: 'Todas las sesiones', sessions });
     } catch (error) {
         res.status(500).json({ message: 'Error al obtener todas las sesiones', error: error.message });
