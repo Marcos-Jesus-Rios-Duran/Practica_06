@@ -11,7 +11,8 @@ import {
     findSessionById, 
     getActiveSessions, 
     getAllSessions as daoGetAllSessions, 
-    deleteAllSessions as daoDeleteAllSessions 
+    deleteAllSessions as daoDeleteAllSessions,
+    logoutSession
 } from '../dao/sessionDao.js';
 
 // Solo generar claves si no existen
@@ -121,23 +122,24 @@ export const login = async (req, res) => {
     }
 
     try {
-        const sessionID = uuidv4();
+        const sessionID = uuidv4();  // Generar un sessionID sin encriptar
         const now = new Date();
         const clientMac = await macaddress.one();
         
-        // Encrypt sessionID and macAddress
-        const encryptedSessionID = encryptData(sessionID);
+        // Encrypt only macAddress and other sensitive data
         const encryptedMacAddress = encryptData(clientMac);
+        const encryptedIp = encryptData(getClientIP(req));
+        const encryptedServerIp = encryptData(getLocalIp());
 
         const sessionData = {
-            sessionID: encryptedSessionID,
+            sessionID,  // Utilizar sessionID sin encriptar
             email,
             nickname,
             macAddress: encryptedMacAddress,
-            ip: getClientIP(req),
+            ip: encryptedIp,  // Asignar la IP encriptada
             createdAt: now,
             lastAccessed: now,
-            serverIp: getLocalIp(),
+            serverIp: encryptedServerIp,  // Asignar el serverIp encriptado
         };
 
         await createSession(sessionData);
@@ -147,6 +149,8 @@ export const login = async (req, res) => {
     }
 };
 
+
+
 export const sessionStatus = async (req, res) => {
     const { sessionID } = req.query;
 
@@ -155,42 +159,36 @@ export const sessionStatus = async (req, res) => {
     }
 
     try {
-        // 📌 Obtener todas las sesiones de la base de datos
-        const sessions = await getAllSessions();
-        console.log("Todas las sesiones obtenidas:", sessions); 
+        // 📌 Obtener la sesión específica de la base de datos
+        const session = await findSessionById(sessionID);
+        console.log("Sesión obtenida:", session);
 
-        // 📌 Desencriptar `sessionID` y `macAddress` para todas las sesiones
-        const decryptedSessions = sessions.map(session => {
-            const decryptedSessionID = decryptData(session.sessionID);
-            const decryptedMacAddress = decryptData(session.macAddress);
-            console.log("Desencriptado sessionID:", decryptedSessionID);
-            console.log("Desencriptado macAddress:", decryptedMacAddress);
-            return {
-                ...session._doc,
-                sessionID: decryptedSessionID,
-                macAddress: decryptedMacAddress
-            };
-        });
-        
-        // 📌 Buscar la sesión que coincida con `sessionID` de la URL
-        const foundSession = decryptedSessions.find(session => session.sessionID === sessionID.trim());
-        console.log("Sesión encontrada:", foundSession);  // Verifica si la sesión fue encontrada correctamente
-        
-
-        if (!foundSession) {
-            console.log("No se encontró la sesión con sessionID:", sessionID);  // Para debug
+        if (!session) {
+            console.log("No se encontró la sesión con sessionID:", sessionID);
             return res.status(404).json({ message: 'Sesión no encontrada' });
         }
 
+        // 📌 Desencriptar `macAddress` y otros datos sensibles
+        try {
+            session.macAddress = decryptData(session.macAddress);
+            session.ip = decryptData(session.ip);
+            session.serverIp = decryptData(session.serverIp);
+        } catch (error) {
+            console.error("Error al desencriptar datos de la sesión:", error.message);
+            return res.status(500).json({ message: 'Error al desencriptar datos de la sesión' });
+        }
+
+        console.log("Sesión desencriptada:", session);
+
         // ⏳ Calcular tiempos
         const now = new Date();
-        const idleTime = (now - new Date(foundSession.lastAccessed)) / 1000;
-        const duration = (now - new Date(foundSession.createdAt)) / 1000;
+        const idleTime = (now - new Date(session.lastAccessed)) / 1000;
+        const duration = (now - new Date(session.createdAt)) / 1000;
 
         // 📌 Enviar la sesión encontrada
         return res.status(200).json({
             message: 'Sesión activa',
-            session: foundSession,
+            session,
             idleTime: `${idleTime} segundos`,
             duration: `${duration} segundos`
         });
@@ -201,6 +199,7 @@ export const sessionStatus = async (req, res) => {
 };
 
 
+
 export const logout = async (req, res) => {
     const { sessionID } = req.body;
 
@@ -209,18 +208,28 @@ export const logout = async (req, res) => {
     }
 
     try {
-        // Encrypt sessionID for lookup
-        const encryptedSessionID = encryptData(sessionID);
-        const session = await deleteSession(encryptedSessionID);
+        const session = await logoutSession(sessionID);
         if (!session) {
             return res.status(404).json({ message: 'No existe una sesión activa' });
         }
-        res.status(200).json({ message: 'Sesión cerrada exitosamente' });
+
+        // Desencriptar macAddress, ip y serverIp para la respuesta (si es necesario)
+        try {
+            session.macAddress = decryptData(session.macAddress);
+            session.ip = decryptData(session.ip);
+            session.serverIp = decryptData(session.serverIp);
+        } catch (error) {
+            console.error("Error al desencriptar datos de la sesión:", error.message);
+            return res.status(500).json({ message: 'Error al desencriptar datos de la sesión' });
+        }
+
+        res.status(200).json({ message: 'Sesión cerrada exitosamente', session });
     } catch (error) {
         res.status(500).json({ message: 'Error al cerrar sesión', error: error.message });
     }
 };
 
+// Controlador para actualizar la sesión
 export const updateSessionController = async (req, res) => {
     const { sessionID, status } = req.body;
 
@@ -229,12 +238,22 @@ export const updateSessionController = async (req, res) => {
     }
 
     try {
-        // Encrypt sessionID for lookup
-        const encryptedSessionID = encryptData(sessionID);
-        const session = await updateSession(encryptedSessionID, status);
+        const session = await updateSession(sessionID, status);
         if (!session) {
+            console.log("Sesión no encontrada con ID:", sessionID);  // Para depurar
             return res.status(404).json({ message: 'No existe una sesión activa' });
         }
+
+        // Desencriptar macAddress, ip y serverIp para la respuesta (si es necesario)
+        try {
+            session.macAddress = decryptData(session.macAddress);
+            session.ip = decryptData(session.ip);
+            session.serverIp = decryptData(session.serverIp);
+        } catch (error) {
+            console.error("Error al desencriptar datos de la sesión:", error.message);
+            return res.status(500).json({ message: 'Error al desencriptar datos de la sesión' });
+        }
+
         res.status(200).json({ message: 'Datos actualizados', session });
     } catch (error) {
         res.status(500).json({ message: 'Error al actualizar sesión', error: error.message });
@@ -248,8 +267,9 @@ export const getAllSessions = async (req, res) => {
         // Decrypt sessionID and macAddress for all sessions
         sessions.forEach(session => {
             try {
-                session.sessionID = decryptData(session.sessionID);
                 session.macAddress = decryptData(session.macAddress);
+                session.ip = decryptData(session.ip);
+                session.serverIp = decryptData(session.serverIp);
             } catch (error) {
                 console.error("Error al desencriptar sesión:", error.message);
             }
@@ -266,8 +286,13 @@ export const getAllCurrentSessions = async (req, res) => {
         const sessions = await getActiveSessions();
         // Decrypt sessionID and macAddress for all sessions
         sessions.forEach(session => {
-            session.sessionID = decryptData(session.sessionID);
-            session.macAddress = decryptData(session.macAddress);
+            try {
+                session.macAddress = decryptData(session.macAddress);
+                session.ip = decryptData(session.ip);
+                session.serverIp = decryptData(session.serverIp);
+            } catch (error) {
+                console.error("Error al desencriptar sesión:", error.message);
+            }
         });
         res.status(200).json({ message: 'Sesiones activas', sessions });
     } catch (error) {

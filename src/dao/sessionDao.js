@@ -15,8 +15,8 @@ const findSessionByEmail = async (inputEmail) => {
     return Session.findOne({ email: inputEmail }).exec();
 };
 
-// 📌 Actualizar estado y último acceso de una sesión
 const updateSession = async (sessionID, status) => {
+    console.log("Actualizando sesión con ID:", sessionID, "y estado:", status);  // Para depurar
     return Session.findOneAndUpdate(
         { sessionID },
         { 
@@ -41,7 +41,7 @@ const updateSession = async (sessionID, status) => {
 
 // 📌 Eliminar sesión por ID
 const deleteSession = async (sessionID) => {
-    return Session.findOneAndDelete({ sessionID }).exec();
+    return Session.findOneAndUpdate({ sessionID }).exec();
 };
 
 // 📌 Obtener todas las sesiones
