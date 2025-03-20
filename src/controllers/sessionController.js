@@ -318,7 +318,7 @@ cron.schedule('* * * * *', async () => {
             const idleTimeInSeconds = (now - session.lastAccessed) / 1000;
 
             // Si la sesión ha estado inactiva por más de 5 minutos, cambiar su estado
-            if (idleTimeInSeconds > 300 && session.status === "Activa") {
+            if (idleTimeInSeconds > 3600 && session.status === "Activa") {
                 await updateSession(session.sessionID, "Inactiva");
                 console.log(`Sesión ${session.sessionID} marcada como inactiva por inactividad.`);
             }
